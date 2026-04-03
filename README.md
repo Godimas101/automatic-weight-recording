@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=slice&height=180&color=0:04130B,45:16A34A,100:06B6D4&text=Automatic%20Weight%20Recording&fontColor=ffffff&fontSize=32&fontAlign=70&fontAlignY=25&rotate=13&desc=Wyze%20Scale%20%E2%86%92%20n8n%20%E2%86%92%20GitHub%20logging&descAlign=60&descAlignY=44&descSize=18" />
+  <img src="https://capsule-render.vercel.app/api?type=slice&height=180&color=0:04130B,45:16A34A,100:06B6D4&text=Automatic%20Weight%20Recording&fontColor=ffffff&fontSize=32&fontAlign=68&fontAlignY=28&rotate=9&desc=Wyze%20Scale%20%E2%86%92%20n8n%20%E2%86%92%20GitHub%20logging&descAlign=60&descAlignY=47&descSize=18" />
 </p>
 
 > **"You can't manage what you don't measure — so I automated the measuring."**
