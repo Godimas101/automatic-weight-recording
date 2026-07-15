@@ -193,4 +193,12 @@ This does a fresh login from your residential IP (bypassing the datacenter block
 
 ---
 
+## 🧡 Support
+
+This tool is free and always will be. If it saves you from another manual weight log, consider supporting on Patreon — it's how the tools and automation experiments keep coming.
+
+[![Support on Patreon](https://raw.githubusercontent.com/Godimas101/personal-projects/main/patreon/images/buttons/patreon-medium.png)](https://patreon.com/Godimas101)
+
+---
+
 *"Automate the boring stuff — especially the part where you write down your weight."*
