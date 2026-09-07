@@ -4,6 +4,15 @@ on:
   issues:
     types: [closed]
 
+# The reusable workflow needs contents: write to commit + push, and
+# pull-requests: write to open the changelog PR (PR flow was introduced
+# 2026-08-18; direct-push fallback requires no branch protection). Both
+# permissions must be granted at the caller — a called workflow can't
+# escalate above what the caller declared.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   call-append:
     uses: gitpush-mod/.github/.github/workflows/append-changelog.yml@main
