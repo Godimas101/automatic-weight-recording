@@ -22,7 +22,7 @@ except ImportError:
     print("ERROR: credentials.py not found.")
     print("Copy credentials.example.py to credentials.py and fill in your values.")
     sys.exit(1)
-ENV_FILE = '/root/n8n-docker-caddy/.env'
+ENV_FILE = '/opt/tcs/n8n/.env'
 
 def main():
     parser = argparse.ArgumentParser()
@@ -59,8 +59,7 @@ def main():
                 print(f"SSH error: {result.stderr}")
                 sys.exit(1)
         print("Done! Tokens updated on server.")
-        print("\nRestart n8n to reload .env:")
-        print(f"  ssh {SERVER} 'cd /root/n8n-docker-caddy && docker compose restart n8n'")
+        print("No restart needed: get_wyze_data.py reads the .env on every run.")
     else:
         print("Run these commands on the server, or re-run with --push to do it automatically:\n")
         print(sed_access)

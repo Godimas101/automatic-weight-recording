@@ -74,8 +74,10 @@ SERVER   = 'root@your-server.example.com'
 ### 3. Install wyze_sdk locally (one time)
 
 ```bash
-pip install wyze_sdk
+pip install "wyze-sdk>=2.3.8"
 ```
+
+wyze-sdk 2.3+ needs Python 3.12–3.14. Older versions ignore the fetch window and download the scale's whole history on every run.
 
 ### 4. Bootstrap tokens onto the server
 
@@ -88,10 +90,10 @@ python bootstrap-wyze-tokens.py
 This logs in and prints two `sed` commands. Run them manually in your server terminal:
 
 ```bash
-sed -i 's|^WYZE_ACCESS_TOKEN=.*|WYZE_ACCESS_TOKEN=<token>|' /root/n8n-docker-caddy/.env
-grep -q '^WYZE_REFRESH_TOKEN=' /root/n8n-docker-caddy/.env \
-  && sed -i 's|^WYZE_REFRESH_TOKEN=.*|WYZE_REFRESH_TOKEN=<token>|' /root/n8n-docker-caddy/.env \
-  || echo 'WYZE_REFRESH_TOKEN=<token>' >> /root/n8n-docker-caddy/.env
+sed -i 's|^WYZE_ACCESS_TOKEN=.*|WYZE_ACCESS_TOKEN=<token>|' /opt/tcs/n8n/.env
+grep -q '^WYZE_REFRESH_TOKEN=' /opt/tcs/n8n/.env \
+  && sed -i 's|^WYZE_REFRESH_TOKEN=.*|WYZE_REFRESH_TOKEN=<token>|' /opt/tcs/n8n/.env \
+  || echo 'WYZE_REFRESH_TOKEN=<token>' >> /opt/tcs/n8n/.env
 ```
 
 Or use `--push` to have the script SSH and apply the changes automatically (requires passwordless SSH key configured locally):
@@ -102,7 +104,7 @@ python bootstrap-wyze-tokens.py --push
 
 ### 5. Add all credentials to server `.env`
 
-Your `/root/n8n-docker-caddy/.env` needs:
+Your `/opt/tcs/n8n/.env` needs:
 
 ```
 WYZE_KEY_ID=<your key ID>
@@ -118,13 +120,20 @@ Make sure `WYZE_KEY_ID` and `WYZE_API_KEY` are also in your `docker-compose.yml`
 ### 6. Copy `get_wyze_data.py` to the server
 
 ```bash
-scp get_wyze_data.py root@your-server:/root/n8n-docker-caddy/
+scp get_wyze_data.py root@your-server:/opt/tcs/scripts/
 ```
 
-Test it manually on the server:
+Give it its own virtualenv on the server (one time):
 
 ```bash
-python3 /root/n8n-docker-caddy/get_wyze_data.py
+python3 -m venv /opt/tcs/scripts/wyze-env
+/opt/tcs/scripts/wyze-env/bin/pip install "wyze-sdk>=2.3.8"
+```
+
+Test it manually on the server (note: this refreshes and rewrites the tokens, same as a scheduled run):
+
+```bash
+/opt/tcs/scripts/wyze-env/bin/python /opt/tcs/scripts/get_wyze_data.py
 ```
 
 Expected output:
