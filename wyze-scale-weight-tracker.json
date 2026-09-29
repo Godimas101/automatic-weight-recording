@@ -9,7 +9,7 @@
     {
       "parameters": {
         "authentication": "privateKey",
-        "command": "python3 /root/n8n-docker-caddy/get_wyze_data.py"
+        "command": "/opt/tcs/scripts/wyze-env/bin/python /opt/tcs/scripts/get_wyze_data.py"
       },
       "id": "788a286a-a7fa-4f36-9242-594af8fa52d1",
       "name": "Execute Wyze Script",

@@ -24,7 +24,7 @@ import sys
 from datetime import datetime, timedelta
 from wyze_sdk import Client
 
-ENV_FILE = '/root/n8n-docker-caddy/.env'
+ENV_FILE = '/opt/tcs/n8n/.env'
 
 
 def load_env_tokens():
@@ -87,9 +87,12 @@ def main():
         # If refresh fails, continue with the existing token — it may still be valid
         print(f"WARNING: Token refresh failed: {e}", file=sys.stderr)
 
-    # Fetch records for the last 2 days to handle timezone edge cases
+    # Only the newest record is used, and the n8n workflow checks its date itself,
+    # so the window just has to always contain *a* reading. wyze-sdk < 2.3.2 ignored
+    # start_time and fetched the whole history; newer versions honour it, so a
+    # short window would turn "didn't weigh in for a couple of days" into an error.
     end_time   = datetime.now()
-    start_time = end_time - timedelta(days=2)
+    start_time = end_time - timedelta(days=30)
 
     try:
         records = client.scales.get_records(start_time=start_time, end_time=end_time)
