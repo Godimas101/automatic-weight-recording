@@ -40,8 +40,13 @@ def main():
     refresh = client._refresh_token
     print("Login successful.\n")
 
-    sed_access  = f"sed -i 's|^WYZE_ACCESS_TOKEN=.*|WYZE_ACCESS_TOKEN={access}|' {ENV_FILE}"
-    # Use grep to add WYZE_REFRESH_TOKEN if it doesn't exist, otherwise sed
+    # Replace each token line if it exists, otherwise append it — a bare sed on a
+    # missing line would silently do nothing and still report success
+    sed_access = (
+        f"grep -q '^WYZE_ACCESS_TOKEN=' {ENV_FILE} "
+        f"&& sed -i 's|^WYZE_ACCESS_TOKEN=.*|WYZE_ACCESS_TOKEN={access}|' {ENV_FILE} "
+        f"|| echo 'WYZE_ACCESS_TOKEN={access}' >> {ENV_FILE}"
+    )
     sed_refresh = (
         f"grep -q '^WYZE_REFRESH_TOKEN=' {ENV_FILE} "
         f"&& sed -i 's|^WYZE_REFRESH_TOKEN=.*|WYZE_REFRESH_TOKEN={refresh}|' {ENV_FILE} "
