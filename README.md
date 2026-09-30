@@ -4,30 +4,41 @@
 
 > **"You can't manage what you don't measure — so I automated the measuring."**
 
-An n8n workflow that automatically reads the latest weight measurement from a Wyze Scale and appends it to [`weight-tracking.md`](https://github.com/Godimas101/personal-projects/blob/main/health-tracking/weight-tracking.md) on GitHub. Step on the scale, walk away, and it's already logged. Very lazy. Very effective.
+An n8n workflow that reads the latest weight measurement from a Wyze Scale every morning and appends it to [`weight-tracking.md`](https://github.com/Godimas101/personal-projects/blob/main/health-tracking/weight-tracking.md) on GitHub. Step on the scale, walk away, and it's already logged. Very lazy. Very effective.
 
-The key design challenge: DigitalOcean IPs are blocked from the Wyze login endpoint, so the server can never call `/api/user/login`. This is solved with a **self-refreshing token chain** — you log in once from a residential IP, store both tokens on the server, and `get_wyze_data.py` calls the refresh endpoint (which is NOT IP-blocked) on every run. As long as it runs at least once every 28 days the chain never breaks.
+The key design challenge: Wyze's login endpoint blocks datacenter IPs (first hit on a DigitalOcean droplet), so the server can never call `/api/user/login`. The fix is a **self-refreshing token chain**:
+- You log in once from a residential IP and store both tokens on the server.
+- On every run, `get_wyze_data.py` calls the refresh endpoint, which is *not* IP-blocked, and writes the new tokens back.
+
+As long as it runs at least once every 28 days, the chain never breaks.
 
 ---
 
 ## How It Works 🔄
 
 ```
-Schedule Trigger (daily)
-  └─ SSH: Execute Wyze Script (get_wyze_data.py on server)
-       └─ Parse Python Output
-            └─ Process Record (check for new data today)
-                 └─ New Data Today?
-                      ├─ YES → GitHub Get File → Build Updated File → GitHub Update File
-                      └─ NO  → (stop, no commit)
+Schedule Trigger (daily, 10:00)
+  └─ Execute Wyze Script (SSH → get_wyze_data.py on the server)
+       └─ Parse Python Output (is the newest reading from today, and not logged yet?)
+            └─ New Data Check (passthrough)
+                 └─ If shouldLog
+                      ├─ true  → Get File → Append New Info → Edit a file → Mark As Logged
+                      └─ false → stop, nothing to log
 ```
 
-1. **Schedule Trigger** — Runs daily at 8 AM
-2. **Execute Wyze Script** — SSHes into the server and runs `get_wyze_data.py`
-3. **Parse Python Output** — Parses the JSON from stdout
-4. **Process Record** — Checks if the reading is from today; extracts weight, body fat, timestamp
-5. **New Data Today?** — Skips the commit if no new reading (prevents duplicates)
-6. **GitHub Get File → Build Updated File → GitHub Update File** — Fetches the current markdown file, appends a new row, commits it back
+1. **Schedule Trigger.** Runs daily at 10:00 in the n8n instance's timezone (`GENERIC_TIMEZONE`; `America/Toronto` here).
+2. **Execute Wyze Script.** SSHes into the server and runs `get_wyze_data.py` in its virtualenv. The script refreshes the Wyze tokens, fetches the last 30 days of scale records, and prints the newest one as JSON.
+3. **Parse Python Output.**
+   - Fails the run if the script reported an error or returned no weight.
+   - Otherwise checks two things: whether the reading is from **today in `America/Toronto`**, and whether its `measure_ts` is different from the last reading logged.
+   - If either check fails, it returns `shouldLog: false`.
+   - If both pass, it formats the fields.
+4. **New Data Check.** A passthrough; the checks above already happened.
+5. **If.** Continues only when `shouldLog` is `true`.
+6. **Get File.** Fetches the tracking file and its SHA from the GitHub REST API. It authenticates with `GITHUB_PAT` from n8n's environment, and retries on failure.
+7. **Append New Info.** Decodes the file, appends one table row, re-encodes it, and builds the commit message `chore: auto-log weight YYYY-MM-DD — NNN lbs`.
+8. **Edit a file.** Commits the updated file through n8n's GitHub node.
+9. **Mark As Logged.** Saves the reading's `measure_ts` in the workflow's static data, so the same reading is never logged twice.
 
 ---
 
@@ -35,25 +46,70 @@ Schedule Trigger (daily)
 
 | File | Purpose |
 |------|---------|
-| `get_wyze_data.py` | **Runs on server.** Fetches latest scale record via Wyze SDK. Self-refreshes tokens on every run. |
-| `bootstrap-wyze-tokens.py` | **Runs locally.** Break-glass script — logs in from your residential IP and pushes fresh tokens to the server. Only needed if the token chain ever breaks. |
-| `credentials.py` | Your local credentials (gitignored — never committed). Created from `credentials.example.py`. |
-| `credentials.example.py` | Template showing required fields for `credentials.py`. |
-| `wyze-scale-weight-tracker.json` | The n8n workflow JSON — import this into your n8n instance. |
-| `patch-workflow.js` | Dev utility for rebuilding the workflow JSON — not needed for normal operation. |
+| `get_wyze_data.py` | **Runs on the server.** Refreshes the tokens, fetches the newest scale record via `wyze-sdk`, and prints it as JSON. |
+| `bootstrap-wyze-tokens.py` | **Runs locally.** Break-glass script: logs in from your residential IP and puts fresh tokens on the server. Only needed if the token chain breaks. |
+| `credentials.py` | Your local credentials. It's gitignored, so it's never committed. You create it from `credentials.example.py`. |
+| `credentials.example.py` | Template showing the fields `credentials.py` needs. |
+| `wyze-scale-weight-tracker.json` | The n8n workflow, exported from the live instance with credentials and instance data stripped. Import it into n8n. |
+
+---
+
+## Requirements 📋
+
+- **Python 3.12–3.14** with **`wyze-sdk` ≥ 2.3.8**, in a virtualenv on the server, and installed locally for the bootstrap script. Older `wyze-sdk` versions ignore the fetch window and download the scale's entire history on every run.
+- **A self-hosted n8n** that can SSH into the server running the script. They can be the same machine.
+- **A native Wyze account** with developer API keys.
+- **A GitHub personal access token** with `repo` scope, plus a GitHub credential in n8n.
 
 ---
 
 ## First-Time Setup 🚀
 
-### 1. Wyze Prerequisites
+The paths below (`/opt/tcs/scripts/…`, `/opt/tcs/n8n/.env`) are this setup's. If yours differ, change `ENV_FILE` at the top of both scripts, and the command in the workflow's **Execute Wyze Script** node.
 
-- A **native** Wyze account (not Google/Apple SSO — SSO accounts can't use the API)
+### 1. Wyze prerequisites
+
+- A **native** Wyze account. Google/Apple SSO accounts can't use the API.
 - Developer API keys from [developer-api-console.wyze.com](https://developer-api-console.wyze.com)
-- The Wyze Scale must be owned by (or shared with and accepted on) this API account
-- Step on the scale at least once after linking so there's a measurement record
+- The Wyze Scale must be owned by this API account, or shared with it and accepted.
+- Step on the scale at least once after linking, so there's a measurement record.
 
-### 2. Local credentials file
+### 2. Put the script on the server
+
+On the server, create the folder and give the script its own virtualenv (one time):
+
+```bash
+sudo mkdir -p /opt/tcs/scripts && sudo chown "$USER" /opt/tcs/scripts
+python3 -m venv /opt/tcs/scripts/wyze-env
+/opt/tcs/scripts/wyze-env/bin/pip install "wyze-sdk>=2.3.8"
+```
+
+Then, from your machine:
+
+```bash
+scp get_wyze_data.py you@your-server:/opt/tcs/scripts/
+```
+
+### 3. Set up the server `.env`
+
+`get_wyze_data.py` reads, and rewrites, `/opt/tcs/n8n/.env` (its `ENV_FILE`). Add your Wyze developer keys:
+
+```
+WYZE_KEY_ID=<your key ID>
+WYZE_API_KEY=<your API key>
+```
+
+The bootstrap in step 5 adds `WYZE_ACCESS_TOKEN` and `WYZE_REFRESH_TOKEN`.
+
+**The GitHub token goes to n8n, not the script.** The **Get File** node reads `GITHUB_PAT` from n8n's own environment, so the n8n container needs:
+- `GITHUB_PAT=<token with repo scope>`
+- `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, so nodes can read `$env`
+
+In this setup, the same `.env` is the n8n compose env file, and compose passes `GITHUB_PAT` into the container.
+
+> The workflow's sticky note also lists `WYZE_PHONE_ID`. Nothing reads it any more, so you can skip it.
+
+### 4. Local credentials file
 
 ```bash
 cp credentials.example.py credentials.py
@@ -66,139 +122,142 @@ EMAIL    = 'your-wyze-email@example.com'
 PASSWORD = 'your-wyze-password'
 KEY_ID   = 'your-key-id-from-wyze-developer-portal'
 API_KEY  = 'your-api-key-from-wyze-developer-portal'
-SERVER   = 'root@your-server.example.com'
+SERVER   = 'you@your-server.example.com'
 ```
+
+`SERVER` must be a login that can write the server's `.env`.
 
 > `credentials.py` is listed in `.gitignore` and will never be committed.
 
-### 3. Install wyze_sdk locally (one time)
+### 5. Bootstrap the tokens
+
+Install `wyze-sdk` locally (one time), then run the bootstrap from your local machine. The login needs a residential IP.
 
 ```bash
 pip install "wyze-sdk>=2.3.8"
-```
-
-wyze-sdk 2.3+ needs Python 3.12–3.14. Older versions ignore the fetch window and download the scale's whole history on every run.
-
-### 4. Bootstrap tokens onto the server
-
-Run from your local machine (residential IP required for login):
-
-```bash
 python bootstrap-wyze-tokens.py
 ```
 
-This logs in and prints two `sed` commands. Run them manually in your server terminal:
-
-```bash
-sed -i 's|^WYZE_ACCESS_TOKEN=.*|WYZE_ACCESS_TOKEN=<token>|' /opt/tcs/n8n/.env
-grep -q '^WYZE_REFRESH_TOKEN=' /opt/tcs/n8n/.env \
-  && sed -i 's|^WYZE_REFRESH_TOKEN=.*|WYZE_REFRESH_TOKEN=<token>|' /opt/tcs/n8n/.env \
-  || echo 'WYZE_REFRESH_TOKEN=<token>' >> /opt/tcs/n8n/.env
-```
-
-Or use `--push` to have the script SSH and apply the changes automatically (requires passwordless SSH key configured locally):
+This logs in and prints two commands that set the token lines, replacing them if they exist and adding them if not. Run them in a terminal on the server. Or re-run with `--push` to have the script SSH in and apply them itself; that needs key-based SSH, since it runs non-interactively.
 
 ```bash
 python bootstrap-wyze-tokens.py --push
 ```
 
-### 5. Add all credentials to server `.env`
+### 6. Test it on the server
 
-Your `/opt/tcs/n8n/.env` needs:
-
-```
-WYZE_KEY_ID=<your key ID>
-WYZE_API_KEY=<your API key>
-WYZE_PHONE_ID=n8n-wyze-scale-sync-01ab
-WYZE_ACCESS_TOKEN=<from bootstrap step>
-WYZE_REFRESH_TOKEN=<from bootstrap step>
-GITHUB_PAT=<GitHub personal access token with repo scope>
-```
-
-Make sure `WYZE_KEY_ID` and `WYZE_API_KEY` are also in your `docker-compose.yml` environment section so n8n can see them.
-
-### 6. Copy `get_wyze_data.py` to the server
-
-```bash
-scp get_wyze_data.py root@your-server:/opt/tcs/scripts/
-```
-
-Give it its own virtualenv on the server (one time):
-
-```bash
-python3 -m venv /opt/tcs/scripts/wyze-env
-/opt/tcs/scripts/wyze-env/bin/pip install "wyze-sdk>=2.3.8"
-```
-
-Test it manually on the server (note: this refreshes and rewrites the tokens, same as a scheduled run):
+**Heads-up:** this is a real run. It refreshes the tokens and rewrites `.env`, exactly like the scheduled run does. That's safe; it's how the chain works.
 
 ```bash
 /opt/tcs/scripts/wyze-env/bin/python /opt/tcs/scripts/get_wyze_data.py
 ```
 
 Expected output:
+
 ```json
 {"data": {"weight": 211.6, "body_fat": 27.2, "bmi": 27.7, "bmr": 1879.0, "muscle": 65.5, ...}}
 ```
 
 ### 7. Import the workflow
 
-Import `wyze-scale-weight-tracker.json` into your n8n instance, configure credentials for the SSH and GitHub nodes, then activate.
+Import `wyze-scale-weight-tracker.json` into n8n. Then:
+
+1. **Execute Wyze Script:** attach an SSH credential (private key) for your server, and check the command's paths.
+2. **Get File:** change the URL to your own tracking file, e.g. `https://api.github.com/repos/YOUR_USER/YOUR_REPO/contents/health/weight-tracking.md`
+3. **Edit a file:** attach your GitHub credential, and set the owner, repository and file path to the same file.
+4. Activate the workflow.
+
+**The tracking file must end with a markdown table.** The workflow appends each row to the end of the file, and the table needs these 11 columns:
+
+```
+| Date | Weight | BMI | Body Fat | Muscle | Body Water | Bone Mineral | Protein | Metabolic Age | BMR | Notes |
+|------|--------|-----|----------|--------|------------|--------------|---------|---------------|-----|-------|
+```
 
 ---
 
 ## Normal Operation ✅
 
-Once set up, nothing needs to be touched. `get_wyze_data.py` calls Wyze's refresh endpoint on every run and writes the new tokens back to `.env` automatically. The rolling 28-day refresh window means the chain stays live indefinitely as long as the workflow runs at least weekly.
+Once set up, nothing needs to be touched. Every run refreshes the tokens and writes them back to `.env`, so the chain stays live as long as the workflow runs at least once every 28 days. It runs daily.
 
-### Manual trigger
+**What gets logged:**
+- **Each run logs at most one reading:** the newest one, and only if it's from today and hasn't been logged yet.
+- **Readings after 10:00:** by the next morning they're "yesterday" and get skipped, so run the workflow manually from the n8n editor to log them.
+- **Days with no weigh-in:** nothing is logged, and the run still succeeds.
 
-To log a reading that happened after the scheduled run time, click **Test workflow** in n8n.
+**When a run fails**, it fails in **Parse Python Output**. The SSH node passes the script's output along even when the script exits with an error, and the error message says why:
+- *"No records returned"*: no reading in the last 30 days, or the scale isn't shared with the API account.
+- *"get_records failed"*: a Wyze API error.
+- A failed token refresh is only a warning. The script carries on with the existing token.
+
+### Rotating the Wyze developer key
+
+1. Generate a new Key ID and API Key at [developer-api-console.wyze.com](https://developer-api-console.wyze.com).
+2. Update `WYZE_KEY_ID` and `WYZE_API_KEY` in the server `.env`.
+
+No restart is needed, because the script reads `.env` on every run.
 
 ---
 
 ## 🚨 Break-Glass: Token Chain Broken
 
-If the server was offline for > 28 days, the refresh token will have expired. Fix it by running `bootstrap-wyze-tokens.py` again from your local machine:
+If the workflow hasn't run for more than 28 days, the refresh token will have expired. Fix it by running the bootstrap again from your local machine:
 
 ```bash
 python bootstrap-wyze-tokens.py --push
 ```
 
-This does a fresh login from your residential IP (bypassing the datacenter block) and pushes new tokens to the server.
+This does a fresh login from your residential IP, bypassing the datacenter block, and pushes new tokens to the server. No n8n restart is needed.
 
 ---
 
-## Scale Data Fields 📊
+## What Gets Logged 📊
 
-`get_wyze_data.py` returns all available fields from the Wyze `ScaleRecord` object:
+Each row is built by **Append New Info**:
+
+| Column | Value |
+|--------|-------|
+| Date | Date and time of the reading in `America/Toronto`, e.g. `2026-09-29 07:42:10` |
+| Weight | lbs, rounded to a whole number |
+| BMI | one decimal |
+| Body Fat | % |
+| Muscle | % |
+| Body Water | % |
+| Bone Mineral | as reported by the scale |
+| Protein | % |
+| Metabolic Age | years |
+| BMR | kcal, rounded |
+| Notes | left empty, for your own notes |
+
+Body-composition values need the scale's impedance measurement. When the scale only captures weight (stepped off too fast, wet feet), the values come back empty or `0`, and the cells are left blank. The `%` columns show a bare `%`.
+
+### Everything the script returns
+
+`get_wyze_data.py` prints every field on the newest `wyze-sdk` `ScaleRecord`. The workflow uses the ones above, plus `measure_ts` for the date check and the dedup check.
 
 | Field | Notes |
 |-------|-------|
-| `weight` | Already in **lbs** (wyze_sdk handles conversion) |
-| `body_fat` | % body fat |
-| `bmi` | Body mass index |
-| `bmr` | Basal metabolic rate (kcal) |
-| `muscle` | Muscle mass (lbs) |
-| `body_water` | % body water |
-| `bone_mineral` | Bone mineral (lbs) |
-| `body_vfr` | Visceral fat rating |
-| `protein` | % protein |
-| `metabolic_age` | Estimated metabolic age |
-| `measure_ts` | Unix timestamp (milliseconds) |
+| `weight` | Already in **lbs**; `wyze-sdk` converts it |
+| `body_fat`, `muscle`, `body_water`, `protein` | Percentages |
+| `bmi`, `bmr`, `bone_mineral`, `metabolic_age` | As logged above |
+| `body_vfr` | Visceral fat rating (not logged) |
+| `measure_ts` | Unix timestamp, milliseconds |
 | `timezone` | e.g. `America/Toronto` |
-| `mac` | Scale MAC address |
-| `user_id` / `family_member_id` | Wyze account user ID |
-
-> **Note:** `body_fat` and other body composition metrics require the scale's impedance measurement — they'll be `null` if the scale only captured weight (e.g. stepped on too quickly, wet feet, etc.)
+| `age`, `height`, `gender`, `body_type`, `occupation` | Profile fields; some are often empty |
+| `impedance`, `measure_type`, `attributes` | Raw measurement details |
+| `id`, `device_id`, `mac`, `user_id`, `family_member_id` | Record, device and account identifiers |
 
 ---
 
 ## Architecture Notes 🏗️
 
-- **Why SSH instead of a direct HTTP call?** Wyze's internal scale API requires HMAC-MD5 signed requests with a hardcoded signing secret. Using the `wyze_sdk` Python library is far simpler and more maintainable than reimplementing the signing in JavaScript inside an n8n Code node.
-- **Why not store tokens in n8n credentials?** The tokens need to be updated on every run. Writing back to `.env` and reloading is straightforward; n8n's credential store doesn't support programmatic updates from within a workflow.
-- **Weight is already in lbs.** The `wyze_sdk` library converts from the scale's raw kg value before returning. Do not multiply by 2.20462 in the `Process Record` node.
+- **Why SSH instead of a direct HTTP call?** Wyze's internal scale API requires HMAC-MD5 signed requests with a hardcoded signing secret. The `wyze-sdk` Python library is far simpler and more maintainable than reimplementing that signing in JavaScript inside an n8n Code node.
+- **Why not store the tokens in n8n credentials?** The tokens rotate on every run, and n8n's credential store can't be updated from inside a workflow. Instead, the script writes the new tokens back to the same `.env` file it reads them from.
+- **Weight is already in lbs.** `wyze-sdk` converts from the scale's raw kg value. Don't multiply by 2.20462 anywhere; **Parse Python Output** relies on this.
+- **Two timezones to change if you're elsewhere:**
+  - the schedule, which uses n8n's `GENERIC_TIMEZONE`
+  - the "is this reading from today?" check, which is hard-coded to `America/Toronto` in **Parse Python Output**
+- **Why a 30-day fetch window?** Only the newest record is used, and the workflow checks its date itself. The window just has to be wide enough to always contain *a* reading. A narrow one would turn "didn't weigh in for a couple of days" into an error.
 
 ---
 
