@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const stdout = items[0].json.stdout;\nif (!stdout) throw new Error('No stdout from SSH node.');\n\nlet parsed;\ntry { parsed = JSON.parse(stdout); } catch(e) { throw new Error('Failed to parse Python output: ' + stdout); }\nif (parsed.error) throw new Error('Python script error: ' + parsed.error);\n\nconst d = parsed.data;\nif (!d || d.weight == null) throw new Error('No weight data in response: ' + stdout);\n\n// Check if reading is from today (Toronto time)\nconst measureDate = new Date(d.measure_ts);\nconst todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });\nconst recordDateStr = measureDate.toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });\n\nif (recordDateStr !== todayStr) {\n  // Return shouldLog: false — the If node will stop the chain here\n  return [{ json: { shouldLog: false, reason: 'Reading from ' + recordDateStr + ', not today (' + todayStr + ').' } }];\n}\n\n// Dedup: skip if this exact measurement was already logged\nconst staticData = $getWorkflowStaticData('global');\nif (staticData.lastLoggedTs === d.measure_ts) {\n  return [{ json: { shouldLog: false, reason: 'Already logged ts: ' + d.measure_ts } }];\n}\n\n// Full EST timestamp: date + time\nconst timestampEST = measureDate.toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace('T', ' ');\n\n// wyze_sdk already returns weight in lbs — do NOT multiply by 2.20462\nconst weightLbs = Math.round(parseFloat(d.weight));\nconst fmt = (val, dec = 1) => (val != null && val !== 0) ? parseFloat(val).toFixed(dec) : '';\nconst bodyFat = fmt(d.body_fat);\nconst bmi = fmt(d.bmi);\nconst muscle = fmt(d.muscle);\nconst bodyWater = fmt(d.body_water);\nconst boneMineralDensity = fmt(d.bone_mineral);\nconst protein = fmt(d.protein);\nconst metabolicAge = (d.metabolic_age != null && d.metabolic_age !== 0) ? String(d.metabolic_age) : '';\nconst bmr = (d.bmr != null && d.bmr !== 0) ? String(Math.round(d.bmr)) : '';\n\nreturn [{ json: {\n  shouldLog: true,\n  measure_ts: d.measure_ts,\n  todayStr,\n  timestampEST,\n  weightLbs,\n  bodyFat,\n  bmi,\n  muscle,\n  bodyWater,\n  boneMineralDensity,\n  protein,\n  metabolicAge,\n  bmr,\n  newRow: '| ' + timestampEST + ' | ' + weightLbs + ' | ' + bmi + ' | ' + bodyFat + ' | ' + muscle + ' | ' + bodyWater + ' | ' + boneMineralDensity + ' | ' + protein + ' | ' + metabolicAge + ' | ' + bmr + ' | |'\n} }];"
+        "jsCode": "const stdout = items[0].json.stdout;\nif (!stdout) throw new Error('No stdout from SSH node.');\n\nlet parsed;\ntry { parsed = JSON.parse(stdout); } catch(e) { throw new Error('Failed to parse Python output: ' + stdout); }\nif (parsed.error) throw new Error('Python script error: ' + parsed.error);\n\nconst d = parsed.data;\nif (!d || d.weight == null) throw new Error('No weight data in response: ' + stdout);\n\n// Check if reading is from today (Toronto time)\nconst measureDate = new Date(d.measure_ts);\nconst todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });\nconst recordDateStr = measureDate.toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });\n\nif (recordDateStr !== todayStr) {\n  // Return shouldLog: false — the If node will stop the chain here\n  return [{ json: { shouldLog: false, reason: 'Reading from ' + recordDateStr + ', not today (' + todayStr + ').' } }];\n}\n\n// Dedup: skip if this exact measurement was already logged\nconst staticData = $getWorkflowStaticData('global');\nif (staticData.lastLoggedTs === d.measure_ts) {\n  return [{ json: { shouldLog: false, reason: 'Already logged ts: ' + d.measure_ts } }];\n}\n\n// Full EST timestamp: date + time\nconst timestampEST = measureDate.toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace('T', ' ');\n\n// wyze_sdk already returns weight in lbs — do NOT multiply by 2.20462\nconst weightLbs = Math.round(parseFloat(d.weight));\nconst fmt = (val, dec = 1) => (val != null && val !== 0) ? parseFloat(val).toFixed(dec) : '';\nconst bodyFat = fmt(d.body_fat);\nconst bmi = fmt(d.bmi);\nconst muscle = fmt(d.muscle);\nconst bodyWater = fmt(d.body_water);\nconst boneMineralDensity = fmt(d.bone_mineral);\nconst protein = fmt(d.protein);\nconst metabolicAge = (d.metabolic_age != null && d.metabolic_age !== 0) ? String(d.metabolic_age) : '';\nconst bmr = (d.bmr != null && d.bmr !== 0) ? String(Math.round(d.bmr)) : '';\n\nreturn [{ json: {\n  shouldLog: true,\n  measure_ts: d.measure_ts,\n  todayStr,\n  timestampEST,\n  weightLbs,\n  bodyFat,\n  bmi,\n  muscle,\n  bodyWater,\n  boneMineralDensity,\n  protein,\n  metabolicAge,\n  bmr\n} }];"
       },
       "id": "bfc8d73e-dfe4-404c-b926-e29cc89e7877",
       "name": "Parse Python Output",
@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "content": "## ⚙️ Wyze Scale → Weight Tracking\n\n**Server .env — required variables:**\n```\nWYZE_KEY_ID=<from Wyze developer portal>\nWYZE_API_KEY=<from Wyze developer portal>\nWYZE_PHONE_ID=n8n-wyze-scale-sync-01ab\nWYZE_ACCESS_TOKEN=<from bootstrap-wyze-tokens.py>\nWYZE_REFRESH_TOKEN=<from bootstrap-wyze-tokens.py>\nGITHUB_PAT=<GitHub PAT with repo scope>\n```\n\n**How authentication works:**\nget_wyze_data.py on the server calls the Wyze refresh endpoint on every run and writes updated tokens back to .env automatically. The chain never expires as long as the workflow runs at least once every 28 days.\n\nIf broken (server offline > 28 days), run bootstrap-wyze-tokens.py locally to do a fresh login from a residential IP and push new tokens.\n\n**Annual key rotation:**\n1. Generate new Key ID + API Key at developer-api-console.wyze.com\n2. Update WYZE_KEY_ID and WYZE_API_KEY in server .env\n3. No restart needed — script reads .env on each run\n\n**Runs:** Daily at 10 AM, or trigger manually",
+        "content": "## ⚙️ Wyze Scale → Weight Tracking\n\n**Server .env — required variables:**\n```\nWYZE_KEY_ID=<from Wyze developer portal>\nWYZE_API_KEY=<from Wyze developer portal>\nWYZE_ACCESS_TOKEN=<from bootstrap-wyze-tokens.py>\nWYZE_REFRESH_TOKEN=<from bootstrap-wyze-tokens.py>\n```\n\n**GitHub:** Get File and Edit a file use the n8n credential **PAT_godimas_sync_n8n**. `GITHUB_PAT` is no longer used (automatic-weight-recording#8).\n\n**How authentication works:**\nget_wyze_data.py on the server calls the Wyze refresh endpoint on every run and writes updated tokens back to .env automatically. The chain never expires as long as the workflow runs at least once every 28 days.\n\nIf broken (server offline > 28 days), run bootstrap-wyze-tokens.py locally to do a fresh login from a residential IP and push new tokens.\n\n**Annual key rotation:**\n1. Generate new Key ID + API Key at developer-api-console.wyze.com\n2. Update WYZE_KEY_ID and WYZE_API_KEY in server .env\n3. No restart needed — script reads .env on each run\n\n**Runs:** Daily at 10 AM, or trigger manually",
         "height": 832,
         "width": 768
       },
@@ -117,10 +117,6 @@
         "headerParameters": {
           "parameters": [
             {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.GITHUB_PAT }}"
-            },
-            {
               "name": "Accept",
               "value": "application/vnd.github+json"
             },
@@ -136,7 +132,9 @@
               "responseFormat": "json"
             }
           }
-        }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -148,11 +146,11 @@
       "name": "Get File",
       "retryOnFail": true,
       "waitBetweenTries": 5000,
-      "notes": "**What**: HTTP GET to GitHub API to fetch weight-tracking.md with SHA (base64-encoded content).\n\n**Why**: SHA is required to safely write updates; GitHub prevents race conditions via SHA comparison. GitHub Content API requires Accept header (application/vnd.github+json) and explicit API version (2022-11-28). Retry configured for network transience (5s wait, 2 attempts).\n\n**Gotchas**: GitHub returns file content base64-encoded. Response.content field has embedded newlines every 76 chars (standard base64 line wrapping) — must strip newlines before decoding. File SHA changes after every edit and is the only value accepted in subsequent PUT."
+      "notes": "**What**: HTTP GET to GitHub API to fetch weight-tracking.md with SHA (base64-encoded content).\n\n**Why**: SHA is required to safely write updates; GitHub prevents race conditions via SHA comparison. GitHub Content API requires Accept header (application/vnd.github+json) and explicit API version (2022-11-28). Retry configured for network transience (5s wait, 2 attempts).\n\n**Gotchas**: GitHub returns file content base64-encoded. Response.content field has embedded newlines every 76 chars (standard base64 line wrapping) — must strip newlines before decoding. File SHA changes after every edit and is the only value accepted in subsequent PUT.\n\n**Auth**: the n8n credential **PAT_godimas_sync_n8n**, the same one Edit a file uses (since 2026-10-14, automatic-weight-recording#8). Until then this node sent `$env.GITHUB_PAT`, whose token was revoked on 2026-10-04, so every weigh-in from 10-04 to 10-14 failed here with a 401."
     },
     {
       "parameters": {
-        "jsCode": "// 1. Get the GitHub file data\nconst item = items[0].json;\nconst sha = item.sha;\nconst currentContent = Buffer.from(item.content.replace(/\\n/g, ''), 'base64').toString('utf-8');\n\n// 2. Get the scale data\nconst health = $('Parse Python Output').first().json;\n\n// 3. Build the Markdown row (Formatting % where needed)\nconst newRow = `| ${health.timestampEST} | ${health.weightLbs} | ${health.bmi} | ${health.bodyFat}% | ${health.muscle}% | ${health.bodyWater}% | ${health.boneMineralDensity} | ${health.protein}% | ${health.metabolicAge} | ${health.bmr} | |`;\n\n// 4. Append to file content\nconst newContent = currentContent.trimEnd() + '\\n' + newRow + '\\n';\n\n// 5. Prepare the output\nreturn [{ \n  json: {\n    sha,\n    fileContent: Buffer.from(newContent, 'utf-8').toString('base64'),\n    commitMessage: `chore: auto-log weight ${health.todayStr} — ${health.weightLbs} lbs`,\n    todayStr: health.todayStr,\n    weightLbs: health.weightLbs\n  } \n}];"
+        "jsCode": "// 1. Get the GitHub file data\nconst item = items[0].json;\nconst sha = item.sha;\nconst currentContent = Buffer.from(item.content.replace(/\\n/g, ''), 'base64').toString('utf-8');\n\n// 2. Get the scale data\nconst health = $('Parse Python Output').first().json;\n\n// 3. Build the Markdown row. A % only where there's a value: when the scale doesn't measure body composition, the\n//    cell stays blank instead of a lone % (automatic-weight-recording#5).\nconst pct = (v) => (v === '' || v == null ? '' : `${v}%`);\nconst newRow = `| ${health.timestampEST} | ${health.weightLbs} | ${health.bmi} | ${pct(health.bodyFat)} | ${pct(health.muscle)} | ${pct(health.bodyWater)} | ${health.boneMineralDensity} | ${pct(health.protein)} | ${health.metabolicAge} | ${health.bmr} | |`;\n\n// 4. Append to file content\nconst newContent = currentContent.trimEnd() + '\\n' + newRow + '\\n';\n\n// 5. Prepare the output\nreturn [{ \n  json: {\n    sha,\n    fileContent: Buffer.from(newContent, 'utf-8').toString('base64'),\n    commitMessage: `chore: auto-log weight ${health.todayStr} — ${health.weightLbs} lbs`,\n    todayStr: health.todayStr,\n    weightLbs: health.weightLbs\n  } \n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -162,7 +160,7 @@
       ],
       "id": "c4adf39b-0bfa-495f-9841-88ecdede6bc1",
       "name": "Append New Info",
-      "notes": "**What**: Decodes GitHub's base64 content, appends formatted measurement row with % signs, re-encodes for upload, builds commit message.\n\n**Why**: GitHub REST API requires file content as base64 in PUT body. Markdown table schema expects % suffix on body fat, muscle, water, and protein columns (workflow adds these). Commit message includes date and weight for audit trail.\n\n**Gotchas**: Buffer.from() with base64 input expects newlines removed (GitHub wraps at 76 chars). Output fileContent must be base64-encoded with newlines removed (GitHub strips on ingest). % formatting is hardcoded per column position — if table schema changes, formatting logic must be updated here."
+      "notes": "**What**: Decodes GitHub's base64 content, appends formatted measurement row with % signs, re-encodes for upload, builds commit message.\n\n**Why**: GitHub REST API requires file content as base64 in PUT body. Markdown table schema expects % suffix on body fat, muscle, water, and protein columns (workflow adds these, only where there's a value: a blank reading stays blank, automatic-weight-recording#5). Commit message includes date and weight for audit trail.\n\n**Gotchas**: Buffer.from() with base64 input expects newlines removed (GitHub wraps at 76 chars). Output fileContent must be base64-encoded with newlines removed (GitHub strips on ingest). % formatting is hardcoded per column position — if table schema changes, formatting logic must be updated here."
     },
     {
       "parameters": {
@@ -300,7 +298,8 @@
   },
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "availableInMCP": true
   },
   "pinData": {}
 }

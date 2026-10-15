@@ -35,7 +35,7 @@ Schedule Trigger (daily, 10:00)
    - If both pass, it formats the fields.
 4. **New Data Check.** A passthrough; the checks above already happened.
 5. **If.** Continues only when `shouldLog` is `true`.
-6. **Get File.** Fetches the tracking file and its SHA from the GitHub REST API. It authenticates with `GITHUB_PAT` from n8n's environment, and retries on failure.
+6. **Get File.** Fetches the tracking file and its SHA from the GitHub REST API. It authenticates with the same n8n GitHub credential as **Edit a file**, and retries on failure.
 7. **Append New Info.** Decodes the file, appends one table row, re-encodes it, and builds the commit message `chore: auto-log weight YYYY-MM-DD — NNN lbs`.
 8. **Edit a file.** Commits the updated file through n8n's GitHub node.
 9. **Mark As Logged.** Saves the reading's `measure_ts` in the workflow's static data, so the same reading is never logged twice.
@@ -101,13 +101,7 @@ WYZE_API_KEY=<your API key>
 
 The bootstrap in step 5 adds `WYZE_ACCESS_TOKEN` and `WYZE_REFRESH_TOKEN`.
 
-**The GitHub token goes to n8n, not the script.** The **Get File** node reads `GITHUB_PAT` from n8n's own environment, so the n8n container needs:
-- `GITHUB_PAT=<token with repo scope>`
-- `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, so nodes can read `$env`
-
-In this setup, the same `.env` is the n8n compose env file, and compose passes `GITHUB_PAT` into the container.
-
-> The workflow's sticky note also lists `WYZE_PHONE_ID`. Nothing reads it any more, so you can skip it.
+**GitHub access is an n8n credential, not part of this `.env`.** **Get File** and **Edit a file** both use one GitHub credential in n8n: a personal access token with `repo` scope on the repo that holds your tracking file. Nothing reads a `GITHUB_PAT` environment variable any more (#8).
 
 ### 4. Local credentials file
 
@@ -155,7 +149,7 @@ python bootstrap-wyze-tokens.py --push
 Expected output:
 
 ```json
-{"data": {"weight": 211.6, "body_fat": 27.2, "bmi": 27.7, "bmr": 1879.0, "muscle": 65.5, ...}}
+{"data": {"weight": 180.0, "body_fat": 20.0, "bmi": 24.0, "bmr": 1700.0, "muscle": 60.0, ...}}
 ```
 
 ### 7. Import the workflow
@@ -163,7 +157,7 @@ Expected output:
 Import `wyze-scale-weight-tracker.json` into n8n. Then:
 
 1. **Execute Wyze Script:** attach an SSH credential (private key) for your server, and check the command's paths.
-2. **Get File:** change the URL to your own tracking file, e.g. `https://api.github.com/repos/YOUR_USER/YOUR_REPO/contents/health/weight-tracking.md`
+2. **Get File:** attach the same GitHub credential, and change the URL to your own tracking file, e.g. `https://api.github.com/repos/YOUR_USER/YOUR_REPO/contents/health/weight-tracking.md`
 3. **Edit a file:** attach your GitHub credential, and set the owner, repository and file path to the same file.
 4. Activate the workflow.
 
@@ -229,7 +223,7 @@ Each row is built by **Append New Info**:
 | BMR | kcal, rounded |
 | Notes | left empty, for your own notes |
 
-Body-composition values need the scale's impedance measurement. When the scale only captures weight (stepped off too fast, wet feet), the values come back empty or `0`, and the cells are left blank. The `%` columns show a bare `%`.
+Body-composition values need the scale's impedance measurement. When the scale only captures weight (stepped off too fast, wet feet), the values come back empty or `0`, and their cells are left blank, the `%` columns too (#5).
 
 ### Everything the script returns
 
